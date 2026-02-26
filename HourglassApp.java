@@ -26,6 +26,9 @@ import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Compact desktop timer/clock widget with persistent state and human-friendly input parsing.
+ */
 public class HourglassApp {
     private enum Mode { STOPPED, RUNNING, PAUSED, EXPIRED }
     private enum ViewMode { TIMER, CLOCK }
@@ -106,6 +109,7 @@ public class HourglassApp {
     }
 
     private void start() {
+        // Initialize persistent state before creating UI so controls reflect saved preferences.
         loadSettings();
         buildUi();
         bindEvents();
@@ -242,6 +246,7 @@ public class HourglassApp {
 
         JMenu clockMenu = new JMenu("Clock");
         JMenu dateMenu = new JMenu("Date format");
+        // Each date format option stores only a formatter pattern; labels are user-facing examples.
         for (Map.Entry<String, String> entry : DATE_FORMATS.entrySet()) {
             JRadioButtonMenuItem item = new JRadioButtonMenuItem(entry.getKey());
             item.setSelected(entry.getValue().equals(clockDatePattern));
@@ -256,6 +261,7 @@ public class HourglassApp {
         }
 
         JMenu zoneMenu = new JMenu("Time zone");
+        // Keep insertion order stable so the menu stays predictable between launches.
         for (Map.Entry<String, String> entry : CLOCK_ZONES.entrySet()) {
             JRadioButtonMenuItem item = new JRadioButtonMenuItem(entry.getKey());
             item.setSelected(entry.getValue().equals(clockZone.getId()));
@@ -349,6 +355,7 @@ public class HourglassApp {
     }
 
     private void installWindowDrag(Component c) {
+        // The frame is undecorated, so drag behavior is implemented manually on major containers.
         MouseAdapter dragHandler = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -403,6 +410,7 @@ public class HourglassApp {
         String input = timeField.getText().trim();
         ParseResult parsed = parseInput(input);
         if (parsed == null || parsed.ms <= 0) {
+            // Keep the app non-blocking: inline validation feedback instead of modal dialogs.
             Toolkit.getDefaultToolkit().beep();
             timeField.setBorder(new LineBorder(new Color(190, 80, 80), 1));
             return;
@@ -454,6 +462,7 @@ public class HourglassApp {
     }
 
     private void onTick() {
+        // Keep hover-dependent controls responsive in both timer and clock modes.
         updateMouseOverWindow();
 
         if (viewMode == ViewMode.CLOCK) {
@@ -467,6 +476,7 @@ public class HourglassApp {
                 onExpire();
                 return;
             }
+            // Update only dynamic fields every frame; structural UI changes are handled by render().
             mainLabel.setText(formatWords(left));
             outerPanel.setProgress(progressFor(left));
         } else if (mode == Mode.PAUSED) {
@@ -484,6 +494,7 @@ public class HourglassApp {
     }
 
     private void onExpire() {
+        // Loop mode immediately starts the next cycle and optionally plays a notification tone.
         if (loopItem.isSelected() && durationMs > 0) {
             endAtMs = System.currentTimeMillis() + durationMs;
             mode = Mode.RUNNING;
@@ -513,6 +524,7 @@ public class HourglassApp {
     }
 
     private void render() {
+        // render() is the single source of truth for visibility/state of controls in timer mode.
         modeSwitchLink.setText(viewMode == ViewMode.TIMER ? "Clock" : "Timer");
 
         if (viewMode == ViewMode.CLOCK) {
@@ -659,6 +671,7 @@ public class HourglassApp {
     private void refreshClock(boolean force) {
         ZonedDateTime now = ZonedDateTime.now(clockZone);
         long epochSec = now.toEpochSecond();
+        // Avoid repaint churn: clock text changes only once per second.
         if (!force && epochSec == lastClockEpochSecond) return;
         lastClockEpochSecond = epochSec;
 
@@ -674,6 +687,7 @@ public class HourglassApp {
     }
 
     private void setLinksVisibility(boolean show, boolean animate) {
+        // Links fade in/out while the timer runs to reduce visual noise when not hovered.
         float target = show ? 1f : 0f;
         if (Math.abs(target - linksTargetAlpha) < 0.001f && animate && linksFadeTimer.isRunning()) {
             return;
@@ -739,7 +753,7 @@ public class HourglassApp {
 
         long elapsedNs = System.nanoTime() - linksFadeStartNs;
         float t = Math.max(0f, Math.min(1f, elapsedNs / (LINKS_FADE_MS * 1_000_000f)));
-        float eased = t * t * (3f - 2f * t); // smoothstep
+        float eased = t * t * (3f - 2f * t); // Smoothstep easing for less abrupt transitions.
         float next = linksStartAlpha + (linksTargetAlpha - linksStartAlpha) * eased;
         linksPanel.setAlpha(next);
 
@@ -852,6 +866,7 @@ public class HourglassApp {
         if (input == null || input.isBlank()) return null;
         String s = input.trim().toLowerCase(Locale.ROOT);
 
+        // Prefer relative durations first; if that fails, interpret as an absolute target date/time.
         Long duration = parseDuration(s);
         if (duration != null && duration > 0) return new ParseResult(duration);
 
@@ -864,6 +879,7 @@ public class HourglassApp {
     private Long parseDuration(String s) {
         if (s.matches("^\\d+$")) return Long.parseLong(s) * 60_000L;
 
+        // "mm:ss" or "hh:mm:ss" style input, including '.' as a separator.
         Matcher clock = Pattern.compile("^(\\d+)([:.])(\\d{2})(?:\\2(\\d{2}))?$").matcher(s);
         if (clock.matches()) {
             long a = Long.parseLong(clock.group(1));
@@ -873,6 +889,7 @@ public class HourglassApp {
             return (a * 3600 + b * 60 + Long.parseLong(c)) * 1000L;
         }
 
+        // Token parser handles free-form text such as "1h 20m", "2.5h", "3days".
         Matcher token = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*([a-z]+)").matcher(s);
         double total = 0;
         int found = 0;
@@ -950,6 +967,7 @@ public class HourglassApp {
             }
         }
 
+        // Supports expressions like "fri", "monday next week at 9am", "wed at 14:30".
         Matcher weekday = Pattern.compile("^(sun|mon|tue|wed|thu|fri|sat)(?:day)?(?:\\s+(next week|next|after next week))?(?:\\s+at\\s+(.+))?$").matcher(s);
         if (weekday.matches()) {
             DayOfWeek day = dayFromShort(weekday.group(1));
@@ -971,6 +989,7 @@ public class HourglassApp {
             return Duration.between(now, target).toMillis();
         }
 
+        // Date + time split parser for text like "Feb 26 at 10:15 pm" or "2026-02-26 22:15".
         Matcher dateTime = Pattern.compile("^(.+?)\\s+(?:at\\s+)?(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?)$").matcher(s);
         if (dateTime.matches()) {
             LocalDate d = parseDate(dateTime.group(1));
@@ -1003,6 +1022,7 @@ public class HourglassApp {
         String ap = m.group(3);
 
         if (ap != null) {
+            // Convert 12-hour input to 24-hour clock.
             if (hh == 12) hh = 0;
             if ("pm".equals(ap)) hh += 12;
         }
@@ -1014,6 +1034,7 @@ public class HourglassApp {
     private LocalDate parseDate(String raw) {
         String s = raw.trim();
 
+        // Numeric date parser: M/D, M/D/YY, M/D/YYYY.
         Matcher slash = Pattern.compile("^(\\d{1,2})/(\\d{1,2})(?:/(\\d{2,4}))?$").matcher(s);
         if (slash.matches()) {
             int month = Integer.parseInt(slash.group(1));
@@ -1027,6 +1048,7 @@ public class HourglassApp {
             }
         }
 
+        // Named month and ISO alternatives.
         List<String> formats = Arrays.asList("MMM d", "MMMM d", "MMM d yyyy", "MMMM d yyyy", "yyyy-MM-dd");
         for (String f : formats) {
             try {
@@ -1063,6 +1085,7 @@ public class HourglassApp {
     }
 
     private void restoreActiveTimer() {
+        // Restore only active countdowns; expired/stopped timers should not auto-resume.
         boolean running = Boolean.parseBoolean(settings.getProperty("running", "false"));
         if (!running) return;
 
@@ -1078,6 +1101,7 @@ public class HourglassApp {
     }
 
     private void loadSettings() {
+        // Missing/corrupt settings are tolerated; defaults keep the app usable.
         if (Files.exists(settingsPath)) {
             try (InputStream in = Files.newInputStream(settingsPath)) {
                 settings.load(in);
@@ -1117,6 +1141,7 @@ public class HourglassApp {
         settings.setProperty("popup", Boolean.toString(popupItem.isSelected()));
         settings.setProperty("closeOnExpire", Boolean.toString(closeOnExpireItem.isSelected()));
 
+        // Persist enough runtime state to recover active timers after restart.
         boolean running = (mode == Mode.RUNNING || mode == Mode.PAUSED);
         settings.setProperty("running", Boolean.toString(running));
         settings.setProperty("durationMs", Long.toString(durationMs));
@@ -1172,6 +1197,7 @@ public class HourglassApp {
     }
 
     private Path resolveSettingsPath() {
+        // Favor APPDATA on Windows; fall back to user home for portability.
         String appData = System.getenv("APPDATA");
         if (appData != null && !appData.isBlank()) {
             return Paths.get(appData, "HourglassClone", "settings.properties");
@@ -1302,6 +1328,7 @@ public class HourglassApp {
 
             g2.setColor(color);
 
+            // Draw clockwise along the frame edges: top -> right -> bottom -> left.
             float part = Math.min(remaining, topLen);
             if (part > 0) {
                 g2.fillRect(0, 0, Math.round(part), t);
