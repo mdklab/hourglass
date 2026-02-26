@@ -103,6 +103,8 @@ public class HourglassApp {
     private long endAtMs = 0;
     private long pausedLeftMs = 0;
     private long expiredAtMs = 0;
+    private Integer savedWindowX = null;
+    private Integer savedWindowY = null;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new HourglassApp().start());
@@ -124,7 +126,7 @@ public class HourglassApp {
         frame.setUndecorated(true);
         frame.setSize(WINDOW_W, WINDOW_H);
         frame.setMinimumSize(new Dimension(WINDOW_MIN_W, WINDOW_MIN_H));
-        frame.setLocationRelativeTo(null);
+        applySavedWindowLocation();
         frame.setAlwaysOnTop(alwaysOnTopItem.isSelected());
         frame.setBackground(new Color(0, 0, 0, 0));
 
@@ -283,6 +285,13 @@ public class HourglassApp {
     }
 
     private void bindEvents() {
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                saveSettings();
+            }
+        });
+
         MouseAdapter menuHandler = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) { maybeShowMenu(e); }
@@ -333,7 +342,7 @@ public class HourglassApp {
 
         stopLink.addActionListener(e -> stopTimer());
         restartLink.addActionListener(e -> restartTimer());
-        closeLink.addActionListener(e -> System.exit(0));
+        closeLink.addActionListener(e -> exitApp());
         modeSwitchLink.addActionListener(e -> {
             viewMode = (viewMode == ViewMode.TIMER) ? ViewMode.CLOCK : ViewMode.TIMER;
             saveSettings();
@@ -515,8 +524,8 @@ public class HourglassApp {
         }
 
         if (closeOnExpireItem.isSelected()) {
-            saveSettings();
-            System.exit(0);
+            exitApp();
+            return;
         }
 
         saveSettings();
@@ -1127,9 +1136,17 @@ public class HourglassApp {
         loopItem.setSelected(Boolean.parseBoolean(settings.getProperty("loop", "false")));
         popupItem.setSelected(Boolean.parseBoolean(settings.getProperty("popup", "true")));
         closeOnExpireItem.setSelected(Boolean.parseBoolean(settings.getProperty("closeOnExpire", "false")));
+
+        savedWindowX = parseInteger(settings.getProperty("windowX"));
+        savedWindowY = parseInteger(settings.getProperty("windowY"));
+        if (savedWindowX == null || savedWindowY == null) {
+            savedWindowX = null;
+            savedWindowY = null;
+        }
     }
 
     private void saveSettings() {
+        rememberWindowPosition();
         settings.setProperty("title", timerTitle == null ? "" : timerTitle);
         settings.setProperty("lastInput", lastInput == null ? "59m" : lastInput);
         settings.setProperty("viewMode", viewMode == ViewMode.CLOCK ? "clock" : "timer");
@@ -1212,6 +1229,68 @@ public class HourglassApp {
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    private Integer parseInteger(String raw) {
+        if (raw == null) return null;
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private void rememberWindowPosition() {
+        if (!frame.isDisplayable()) return;
+        Point location = frame.getLocation();
+        settings.setProperty("windowX", Integer.toString(location.x));
+        settings.setProperty("windowY", Integer.toString(location.y));
+    }
+
+    private void applySavedWindowLocation() {
+        if (savedWindowX == null || savedWindowY == null) {
+            frame.setLocationRelativeTo(null);
+            return;
+        }
+
+        Rectangle candidate = new Rectangle(savedWindowX, savedWindowY, frame.getWidth(), frame.getHeight());
+        if (isFullyVisibleOnAnyScreen(candidate)) {
+            frame.setLocation(savedWindowX, savedWindowY);
+        } else {
+            frame.setLocationRelativeTo(null);
+        }
+    }
+
+    private boolean isFullyVisibleOnAnyScreen(Rectangle candidate) {
+        long visibleArea = 0L;
+        long totalArea = Math.max(1L, (long) candidate.width * (long) candidate.height);
+        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+        Toolkit toolkit = Toolkit.getDefaultToolkit();
+
+        for (GraphicsDevice device : ge.getScreenDevices()) {
+            GraphicsConfiguration config = device.getDefaultConfiguration();
+            Rectangle usableBounds = new Rectangle(config.getBounds());
+            Insets insets = toolkit.getScreenInsets(config);
+            usableBounds.x += insets.left;
+            usableBounds.y += insets.top;
+            usableBounds.width -= (insets.left + insets.right);
+            usableBounds.height -= (insets.top + insets.bottom);
+            if (usableBounds.width <= 0 || usableBounds.height <= 0) continue;
+
+            Rectangle intersection = candidate.intersection(usableBounds);
+            if (intersection.width > 0 && intersection.height > 0) {
+                visibleArea += (long) intersection.width * (long) intersection.height;
+                if (visibleArea >= totalArea) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void exitApp() {
+        saveSettings();
+        System.exit(0);
     }
 
     private static class RoundedBackgroundPanel extends JPanel {
